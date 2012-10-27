@@ -8,10 +8,14 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 
+#if (NGX_HAVE_SYSTEMD)
+#include <systemd/sd-daemon.h>
+#endif
 
 static ngx_int_t ngx_parse_unix_domain_url(ngx_pool_t *pool, ngx_url_t *u);
 static ngx_int_t ngx_parse_inet_url(ngx_pool_t *pool, ngx_url_t *u);
 static ngx_int_t ngx_parse_inet6_url(ngx_pool_t *pool, ngx_url_t *u);
+static ngx_int_t ngx_parse_file_descriptor_url(ngx_pool_t *pool, ngx_url_t *u);
 
 
 in_addr_t
@@ -522,6 +526,10 @@ ngx_parse_url(ngx_pool_t *pool, ngx_url_t *u)
         return ngx_parse_unix_domain_url(pool, u);
     }
 
+    if (ngx_strncasecmp(p, (u_char *) "fd:", 3) == 0) {
+        return ngx_parse_file_descriptor_url(pool, u);
+    }
+
     if (p[0] == '[') {
         return ngx_parse_inet6_url(pool, u);
     }
@@ -601,6 +609,145 @@ ngx_parse_unix_domain_url(ngx_pool_t *pool, ngx_url_t *u)
 #else
 
     u->err = "the unix domain sockets are not supported on this platform";
+
+    return NGX_ERROR;
+
+#endif
+}
+
+static ngx_int_t
+ngx_parse_file_descriptor_url(ngx_pool_t *pool, ngx_url_t *u)
+{
+#if (NGX_HAVE_SYSTEMD)
+    u_char               *path;
+    size_t                len;
+    socklen_t             l;
+    int                   fd;
+    u_char                printable[256];
+    struct sockaddr      *sa;
+    struct sockaddr_in   *sin;
+#if (NGX_HAVE_INET6)
+    struct sockaddr_in6  *sin6;
+#endif
+#if (NGX_HAVE_UNIX_DOMAIN)
+    struct sockaddr_un   *saun;
+#endif
+
+    printf("Parsing listening URL: %s\n", u->url.data);
+
+    // This doesn't seem to be used for fd: listeners, but validate that assumption.
+    if (u->uri_part) {
+        u->err = "u->uri_part is unsupported for file descriptors";
+        return NGX_ERROR;
+    }
+
+    // Truncate the preceding "fd:" and ensure there's text left.
+    path = u->url.data + 3;
+    len = u->url.len - 3;
+    if (len == 0) {
+        u->err = "No number specified for the listening file descriptor.";
+        return NGX_ERROR;
+    }
+
+    // Convert the fd text to a numeric file descriptor.
+    fd = ngx_atoi(path, len);
+    printf("Parsed file descriptor #%d\n", fd);
+
+    // Check that it's the proper type of socket.
+    if (!sd_is_socket(fd, 0, SOCK_STREAM, 1)) {
+        u->err = "the systemd file descriptor passed in is not is listening, streaming socket";
+        return NGX_ERROR;
+    }
+    
+    u->fd = fd;
+    sa = (struct sockaddr *) &u->sockaddr;
+    l = sizeof(sa);
+    
+#if (NGX_HAVE_UNIX_DOMAIN)
+    // Bump up the allocation if it's a Unix domain socket.
+    if (sd_is_socket_unix(fd, SOCK_STREAM, 1, NULL, 0) > 0) {
+        printf("Reallocating for socket size %lu\n", sizeof(struct sockaddr_un));
+        sa = ngx_pcalloc(pool, sizeof(struct sockaddr_un));
+        if (sa == NULL) {
+            return NGX_ERROR;
+        }
+        memset(sa, 0, sizeof(struct sockaddr_un));
+        l = sizeof(struct sockaddr_un);
+    }
+#endif
+
+    // Get the socket information from the file descriptor.
+    if (getsockname(u->fd, sa, &l) < 0) {
+        u->err = "Couldn't read socket information out of the specified file descriptor.";
+        return NGX_ERROR;
+    }
+    
+    u->family = sa->sa_family;
+
+    // Get type-specific information.
+    if (u->family == AF_INET) {
+        printf("INET\n");
+        sin = (struct sockaddr_in *) sa;
+        u->socklen = sizeof(struct sockaddr_in);
+        u->port = ntohs(sin->sin_port);
+        u->no_port = 1;
+        sin->sin_family = AF_INET;
+
+        if (&sin->sin_addr == NULL) {
+            printf("Wildcard address.\n");
+            u->wildcard = 1;
+        }
+    }
+#if (NGX_HAVE_INET6)
+    else if (u->family == AF_INET6) {
+        printf("INET6\n");
+        sin6 = (struct sockaddr_in6 *) sa;
+        u->socklen = sizeof(struct sockaddr_in6);
+        u->port = ntohs(sin6->sin6_port);
+        u->no_port = 1;
+        sin6->sin6_family = AF_INET6;
+
+        if (IN6_IS_ADDR_UNSPECIFIED(&sin6->sin6_addr)) {
+            printf("Wildcard address.\n");
+            u->wildcard = 1;
+        }
+    }
+#endif
+#if (NGX_HAVE_UNIX_DOMAIN)
+    else if (u->family == AF_UNIX) {
+        saun = (struct sockaddr_un *) sa;
+        saun->sun_family = AF_UNIX;
+        u->socklen = sizeof(struct sockaddr_un);        
+        u->naddrs = 1;
+        u->addrs = ngx_pcalloc(pool, sizeof(ngx_addr_t));
+        if (u->addrs == NULL) {
+            return NGX_ERROR;
+        }
+        u->addrs[0].sockaddr = (struct sockaddr *) saun;
+        u->addrs[0].socklen = sizeof(struct sockaddr_un);
+        u->addrs[0].name.len = len + 2;
+        u->addrs[0].name.data = u->url.data;
+    }
+#endif
+    else {
+        u->err = "File descriptor uses a socket family whose support is not compiled in";
+        return NGX_ERROR;
+    }
+
+    // Get a human-readable/printable representation of the socket address.
+    ngx_sock_ntop(sa, printable, sizeof(printable), u->port);
+
+    // Set the "host" to the file descriptor number text (for now).
+    u->host.len = len + 1;
+    u->host.data = path;
+
+    printf("Prepared socket: %s\n", printable);
+
+    return NGX_OK;
+
+#else
+
+    u->err = "the systemd file descriptor sockets are not supported on this platform";
 
     return NGX_ERROR;
 

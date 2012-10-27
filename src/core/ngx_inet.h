@@ -99,6 +99,9 @@ typedef struct {
     ngx_uint_t                naddrs;
 
     char                     *err;
+
+    // Pre-initialized file descriptor.
+    int                       fd;
 } ngx_url_t;
 
 

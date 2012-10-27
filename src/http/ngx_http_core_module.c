@@ -1820,7 +1820,7 @@ ngx_http_set_etag(ngx_http_request_t *r)
 {
     ngx_table_elt_t           *etag;
     ngx_http_core_loc_conf_t  *clcf;
-
+    
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
 
     if (!clcf->etag) {
@@ -3904,6 +3904,14 @@ ngx_http_core_listen(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_memzero(&lsopt, sizeof(ngx_http_listen_opt_t));
 
     ngx_memcpy(&lsopt.u.sockaddr, u.sockaddr, u.socklen);
+
+    // If there's a file descriptor to inherit, use it.
+    if (u.fd) {
+        ngx_conf_log_error(NGX_LOG_INFO, cf, 0,
+                   "Found file descriptor #%d. Setting it as a listening option.\n",
+                    u.fd);
+        lsopt.fd = u.fd;
+    }
 
     lsopt.socklen = u.socklen;
     lsopt.backlog = NGX_LISTEN_BACKLOG;

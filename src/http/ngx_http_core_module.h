@@ -67,6 +67,9 @@ typedef struct {
     } u;
 
     socklen_t                  socklen;
+    
+    // Inherited file descriptor.
+    int                        fd;
 
     unsigned                   set:1;
     unsigned                   default_server:1;

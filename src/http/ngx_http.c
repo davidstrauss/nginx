@@ -1791,6 +1791,14 @@ ngx_http_add_listening(ngx_conf_t *cf, ngx_http_conf_addr_t *addr)
     ls->setfib = addr->opt.setfib;
 #endif
 
+    ngx_log_error(NGX_LOG_INFO, cf->log, 0,
+                  "Looking for a file descriptor in the listening options.");
+    if (addr->opt.fd) {
+        ngx_log_error(NGX_LOG_INFO, cf->log, 0,
+                      "Found file descriptor %d on listening options. Using it.", addr->opt.fd);
+        ls->fd = addr->opt.fd;
+    }
+
     return ls;
 }
 

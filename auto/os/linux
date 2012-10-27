@@ -134,6 +134,24 @@ ngx_feature_test="cpu_set_t mask;
 . auto/feature
 
 
+# systemd()
+
+if [ $NGX_SYSTEMD = YES ]; then
+    ngx_feature="systemd()"
+    ngx_feature_name="NGX_HAVE_SYSTEMD"
+    ngx_feature_run=yes
+    ngx_feature_incs="#include <systemd/sd-daemon.h>"
+    ngx_feature_path=
+    ngx_feature_libs=-lsystemd-daemon
+    ngx_feature_test="sd_is_socket(1, 0, 0, 0);"
+    . auto/feature
+    
+    if [ $ngx_found = yes ]; then
+        CORE_LIBS="$CORE_LIBS -lsystemd-daemon"
+    fi
+fi
+
+
 # crypt_r()
 
 ngx_feature="crypt_r()"

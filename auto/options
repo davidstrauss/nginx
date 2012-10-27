@@ -46,6 +46,7 @@ USE_THREADS=NO
 
 NGX_FILE_AIO=NO
 NGX_IPV6=NO
+NGX_SYSTEMD=NO
 
 HTTP=YES
 
@@ -190,6 +191,7 @@ do
 
         --with-file-aio)                 NGX_FILE_AIO=YES           ;;
         --with-ipv6)                     NGX_IPV6=YES               ;;
+        --with-systemd)                  NGX_SYSTEMD=YES            ;;
 
         --without-http)                  HTTP=NO                    ;;
         --without-http-cache)            HTTP_CACHE=NO              ;;
@@ -347,6 +349,7 @@ cat << END
 
   --with-file-aio                    enable file AIO support
   --with-ipv6                        enable IPv6 support
+  --with-systemd                     enable systemd socket support
 
   --with-http_ssl_module             enable ngx_http_ssl_module
   --with-http_realip_module          enable ngx_http_realip_module
